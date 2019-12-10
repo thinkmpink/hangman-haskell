@@ -32,7 +32,10 @@ main = hspec $ do
   describe "handleGuess" $ do
     it "adds a bad guess only to \
        \allGuesses in the puzzle" $ do
-      property prop_addsBadGuessToAllGuessesOnly
+      property (again prop_addsBadGuessToAllGuessesOnly)
+    it "does nothing with a guess \
+       \that was already attempted" $ do
+      property (again prop_noModifyKnownGuess)
 
 newtype IncompletePuzzle = IncompletePuzzle Puzzle
   deriving (Eq, Show)
@@ -67,10 +70,19 @@ genIPuzAndBadGuess = do
   ch  <- elements ['1'..'9']
   return (puz, ch)
 
+genIPuzAndTriedGuess :: Gen (IncompletePuzzle, Char)
+genIPuzAndTriedGuess = do
+  puz@(IncompletePuzzle (Puzzle _ _ a')) <-
+    suchThat arbitrary
+      (\(IncompletePuzzle (Puzzle _ _ a)) ->
+         not . null $ a)
+  ch <- elements a'
+  return (puz, ch)
+
 prop_addsNewCharacter :: Property
 prop_addsNewCharacter =
   forAll genIPuzAndGoodGuess $
-    \((IncompletePuzzle puz), ch) ->
+    \(IncompletePuzzle puz, ch) ->
       addsNew (fillInCharacter puz ch) puz
   where
     addsNew (Puzzle _ _ (n:_))
@@ -81,7 +93,7 @@ prop_addsNewCharacter =
 prop_buildsCharacter :: Property
 prop_buildsCharacter =
   forAll genIPuzAndGoodGuess $
-    \((IncompletePuzzle puz), ch) ->
+    \(IncompletePuzzle puz, ch) ->
       isFuller (fillInCharacter puz ch) puz
   where
     isFuller (Puzzle _ newGood newAll)
@@ -93,14 +105,22 @@ prop_buildsCharacter =
 
 prop_addsBadGuessToAllGuessesOnly :: Property
 prop_addsBadGuessToAllGuessesOnly = ioProperty $ do
-  ((IncompletePuzzle puz), ch):_ <-
+  (IncompletePuzzle puz, ch):_ <-
     sample' genIPuzAndBadGuess
   newPuz <- handleGuess puz ch
   return $ checkGuess ch newPuz puz
   where
     checkGuess c (Puzzle w goodNew allNew)
-                 (Puzzle _ goodOld allOld) =
+                 (Puzzle _ _       allOld) =
          elem c allNew
       && (not . elem c $ allOld)
       && (not . elem (Just c) $ goodNew)
       && (not . elem c $ w)
+
+
+prop_noModifyKnownGuess :: Property
+prop_noModifyKnownGuess = ioProperty $ do
+  (IncompletePuzzle puz, ch):_ <-
+    sample' genIPuzAndTriedGuess
+  newPuz <- handleGuess puz ch
+  return (newPuz == puz)
